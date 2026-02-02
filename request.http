@@ -1,0 +1,15 @@
+POST http://127.0.0.1:3000/notify
+Content-Type: application/json
+
+{
+  "notify": "this is notification content",
+  "device": "dev1",
+  "title": "Notification"
+}
+
+###
+GET http://127.0.0.1:3000
+
+###
+
+
