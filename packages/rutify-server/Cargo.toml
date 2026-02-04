@@ -27,5 +27,12 @@ slint = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 
+# JWT 认证依赖
+jsonwebtoken = "9.2"
+uuid = { version = "1.6", features = ["v4"] }
+sha2 = "0.10"
+hex = "0.4"
+time = "0.3"
+
 [build-dependencies]
 slint-build = { workspace = true }

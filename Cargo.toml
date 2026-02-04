@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "packages/rutify-core",
     "packages/rutify-sdk",
+    "packages/rutify-client",
     "packages/rutify-server", 
     "packages/rutify-cli",
     "packages/rutify-application",
@@ -43,3 +44,4 @@ slint-build = "1.14"
 # 内部包依赖
 rutify-core = { path = "packages/rutify-core", version = "0.1.0" }
 rutify-sdk = { path = "packages/rutify-sdk", version = "0.1.0" }
+rutify-client = { path = "packages/rutify-client", version = "0.1.0" }

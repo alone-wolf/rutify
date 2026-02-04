@@ -3,11 +3,14 @@ use axum::Json;
 use axum::response::IntoResponse;
 use sea_orm::DbErr;
 use tracing::error;
+use std::fmt;
 
 #[derive(Debug)]
 pub(crate) enum AppError {
     Db(DbErr),
     Json(serde_json::Error),
+    AuthError(String),
+    DatabaseError(String),
 }
 
 impl From<DbErr> for AppError {
@@ -22,17 +25,35 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::Db(err) => write!(f, "Database error: {}", err),
+            AppError::Json(err) => write!(f, "JSON error: {}", err),
+            AppError::AuthError(msg) => write!(f, "Authentication error: {}", msg),
+            AppError::DatabaseError(msg) => write!(f, "Database operation error: {}", msg),
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        let status = StatusCode::INTERNAL_SERVER_ERROR;
-        let message = match self {
+        let (status, message) = match self {
             AppError::Db(err) => {
                 error!(error = %err, "database error");
-                "database error"
+                (StatusCode::INTERNAL_SERVER_ERROR, "database error".to_string())
             }
             AppError::Json(err) => {
                 error!(error = %err, "json error");
-                "json error"
+                (StatusCode::BAD_REQUEST, "json error".to_string())
+            }
+            AppError::AuthError(msg) => {
+                error!(error = %msg, "authentication error");
+                (StatusCode::UNAUTHORIZED, msg.clone())
+            }
+            AppError::DatabaseError(msg) => {
+                error!(error = %msg, "database operation error");
+                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
             }
         };
         (status, Json(serde_json::json!({ "error": message }))).into_response()

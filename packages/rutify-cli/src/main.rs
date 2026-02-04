@@ -1,11 +1,13 @@
 use clap::{Parser, Subcommand};
-use rutify_sdk::RutifyClient;
+use rutify_client::{ClientState, send_and_listen, health_check, format_notification, format_stats, WebSocketNotification};
+
+mod token_commands;
 
 #[derive(Parser)]
 #[command(name = "rutify-cli")]
 #[command(about = "Rutify CLI client")]
 struct Cli {
-    #[arg(short, long, default_value = "http://127.0.0.1:3000")]
+    #[arg(short, long, default_value = "http://127.0.0.1:8080")]
     server: String,
 
     #[command(subcommand)]
@@ -47,26 +49,25 @@ enum Commands {
     Devices,
     /// Server health check
     Health,
+    /// Token management
+    Token {
+        #[command(subcommand)]
+        action: token_commands::TokenAction,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let client = RutifyClient::new(&cli.server);
+    let state = ClientState::new(&cli.server);
 
     match cli.command {
         Commands::Notifies => {
-            match client.get_notifies().await {
+            match state.get_notifies().await {
                 Ok(notifies) => {
                     println!("📬 Notifications ({} total):", notifies.len());
                     for (i, notify) in notifies.iter().enumerate() {
-                        println!("  {}. {} - {} ({})", 
-                            i + 1, 
-                            notify.title, 
-                            notify.notify, 
-                            notify.device
-                        );
-                        println!("     Received: {}", notify.received_at.format("%Y-%m-%d %H:%M:%S"));
+                        println!("  {}. {}", i + 1, format_notification(notify));
                         if i < notifies.len() - 1 {
                             println!();
                         }
@@ -79,13 +80,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Stats => {
-            match client.get_stats().await {
+            match state.get_stats().await {
                 Ok(stats) => {
                     println!("📊 Server Statistics:");
-                    println!("  Today's notifications: {}", stats.today_count);
-                    println!("  Total notifications: {}", stats.total_count);
-                    println!("  Active devices: {}", stats.device_count);
-                    println!("  Server running: {}", if stats.is_running { "✅ Yes" } else { "❌ No" });
+                    println!("  {}", format_stats(&stats));
                 }
                 Err(e) => {
                     eprintln!("❌ Failed to get stats: {}", e);
@@ -100,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
                 device,
             };
             
-            match client.send_notification(&input).await {
+            match state.send_notification(&input).await {
                 Ok(_) => {
                     println!("✅ Notification sent successfully!");
                 }
@@ -114,28 +112,27 @@ async fn main() -> anyhow::Result<()> {
             println!("🎧 Listening for WebSocket notifications...");
             println!("   Press Ctrl+C to stop");
             
-            match client.connect_websocket().await {
+            match state.listen_websocket_updates().await {
                 Ok(mut rx) => {
-                    while let Some(msg) = rx.recv().await {
-                        match msg {
-                            rutify_sdk::WebSocketMessage::Event(event) => {
+                    while let Some(notification) = rx.recv().await {
+                        match notification {
+                            WebSocketNotification::Event(event) => {
                                 println!("🔔 New notification:");
                                 println!("   Title: {}", event.data.title);
                                 println!("   Message: {}", event.data.notify);
                                 println!("   Device: {}", event.data.device);
                                 println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
                             }
-                            rutify_sdk::WebSocketMessage::Text(text) => {
+                            WebSocketNotification::Text(text) => {
                                 println!("📝 Text message: {}", text);
                             }
-                            rutify_sdk::WebSocketMessage::Error { message } => {
+                            WebSocketNotification::Error { message } => {
                                 eprintln!("❌ Error: {}", message);
                             }
-                            rutify_sdk::WebSocketMessage::Close => {
+                            WebSocketNotification::Close => {
                                 println!("🔌 Connection closed");
                                 break;
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -146,48 +143,34 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::SendAndListen { message, title, device } => {
-            let input = rutify_sdk::NotificationInput {
-                notify: message,
-                title,
-                device,
-            };
-            
             println!("📤 Sending notification and listening for response...");
             
-            match client.connect_websocket().await {
-                Ok(mut rx) => {
-                    // Send notification
-                    if let Err(e) = client.send_notification(&input).await {
-                        eprintln!("❌ Failed to send notification: {}", e);
-                        std::process::exit(1);
-                    }
-                    println!("✅ Notification sent, waiting for response...");
-                    
-                    // Listen for response
-                    while let Some(msg) = rx.recv().await {
-                        match msg {
-                            rutify_sdk::WebSocketMessage::Event(event) => {
-                                println!("🔔 Response received:");
-                                println!("   Title: {}", event.data.title);
-                                println!("   Message: {}", event.data.notify);
-                                println!("   Device: {}", event.data.device);
-                                println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
-                                break;
-                            }
-                            rutify_sdk::WebSocketMessage::Text(text) => {
-                                println!("📝 Response: {}", text);
-                                break;
-                            }
-                            rutify_sdk::WebSocketMessage::Error { message } => {
-                                eprintln!("❌ Error: {}", message);
-                                break;
-                            }
-                            _ => {}
+            match send_and_listen(&state, message, title, device).await {
+                Ok(Some(notification)) => {
+                    match notification {
+                        WebSocketNotification::Event(event) => {
+                            println!("🔔 Response received:");
+                            println!("   Title: {}", event.data.title);
+                            println!("   Message: {}", event.data.notify);
+                            println!("   Device: {}", event.data.device);
+                            println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
+                        }
+                        WebSocketNotification::Text(text) => {
+                            println!("📝 Response: {}", text);
+                        }
+                        WebSocketNotification::Error { message } => {
+                            eprintln!("❌ Error: {}", message);
+                        }
+                        WebSocketNotification::Close => {
+                            println!("🔌 Connection closed");
                         }
                     }
                 }
+                Ok(None) => {
+                    println!("⏰ No response received");
+                }
                 Err(e) => {
-                    eprintln!("❌ Failed to connect WebSocket: {}", e);
+                    eprintln!("❌ Failed to send and listen: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -197,16 +180,22 @@ async fn main() -> anyhow::Result<()> {
             println!("📱 Device management not yet implemented");
         }
         Commands::Health => {
-            // Simple health check by trying to get stats
-            match client.get_stats().await {
-                Ok(_) => {
+            match health_check(&state).await {
+                Ok(true) => {
                     println!("✅ Server is healthy and responsive");
+                }
+                Ok(false) => {
+                    eprintln!("❌ Server health check failed");
+                    std::process::exit(1);
                 }
                 Err(e) => {
                     eprintln!("❌ Server health check failed: {}", e);
                     std::process::exit(1);
                 }
             }
+        }
+        Commands::Token { action } => {
+            token_commands::handle_token_command(&state, action).await?;
         }
     }
 

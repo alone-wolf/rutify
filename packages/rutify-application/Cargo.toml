@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 # 内部依赖
+rutify-client = { path = "../rutify-client" }
 rutify-sdk = { workspace = true }
 
 # 外部依赖
@@ -22,8 +23,6 @@ slint = { workspace = true }
 slint-build = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
-serde = { workspace = true }
-chrono = { workspace = true }
 
 [build-dependencies]
 slint-build = { workspace = true }

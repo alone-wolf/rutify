@@ -1,22 +1,21 @@
 [package]
-name = "rutify-cli"
+name = "rutify-client"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Rutify CLI client"
-
-[[bin]]
-name = "rutify-cli"
-path = "src/main.rs"
+description = "Rutify shared client library"
 
 [dependencies]
 # 内部依赖
-rutify-client = { path = "../rutify-client" }
 rutify-sdk = { workspace = true }
 
 # 外部依赖
 tokio = { workspace = true }
-clap = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }

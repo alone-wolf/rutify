@@ -1,1 +1,2 @@
 pub mod m00001_create_table_notifies;
+pub mod m00002_create_table_tokens;

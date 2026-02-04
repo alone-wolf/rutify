@@ -1,4 +1,5 @@
 mod app;
+mod auth;
 mod db;
 mod error;
 mod routes;
@@ -28,14 +29,8 @@ struct CliArgs {
 }
 
 fn main() -> anyhow::Result<()> {
-    // let ui = AppWindow::new().unwrap().run().unwrap();
-    // ui.show();
-
     let args = CliArgs::parse();
     println!("ui:{}", args.ui);
-
-    // init_logging(&args);
-
     match args.ui {
         true => run_with_ui()?,
         false => run_cli_only()?,

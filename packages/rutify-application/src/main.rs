@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use rutify_sdk::RutifyClient;
+use rutify_client::{ClientState, send_and_listen as client_send_and_listen, WebSocketNotification};
 use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
 
@@ -7,16 +7,16 @@ use std::collections::VecDeque;
 #[command(name = "rutify-application")]
 #[command(about = "Rutify GUI application")]
 struct Cli {
-    #[arg(short, long, default_value = "http://127.0.0.1:3000")]
+    #[arg(short, long, default_value = "http://127.0.0.1:8080")]
     server: String,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the GUI application
+    /// Start the GUI application (default)
     Gui,
     /// Listen for WebSocket notifications in console
     Listen,
@@ -32,23 +32,59 @@ enum Commands {
         #[arg(long)]
         device: Option<String>,
     },
+    /// Token management
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenAction {
+    /// Create a new token
+    Create {
+        /// Token usage/purpose
+        usage: String,
+        /// Expiration time in hours (default: 24)
+        #[arg(long, default_value = "24")]
+        expires_in: u64,
+    },
+    /// Set token for authentication
+    Set {
+        /// Bearer token
+        token: String,
+    },
+    /// Clear stored token
+    Clear,
+    /// Show current token status
+    Status,
+}
+
+impl Default for Commands {
+    fn default() -> Self {
+        Commands::Gui
+    }
 }
 
 slint::include_modules!();
 
 struct AppState {
-    client: RutifyClient,
-    notifications: Arc<Mutex<VecDeque<rutify_sdk::NotifyItem>>>,
-    stats: Arc<Mutex<Option<rutify_sdk::Stats>>>,
+    client_state: ClientState,
 }
 
 impl AppState {
     fn new(server_url: &str) -> Self {
         Self {
-            client: RutifyClient::new(server_url),
-            notifications: Arc::new(Mutex::new(VecDeque::with_capacity(100))),
-            stats: Arc::new(Mutex::new(None)),
+            client_state: ClientState::new(server_url),
         }
+    }
+    
+    fn notifications(&self) -> Arc<Mutex<VecDeque<rutify_sdk::NotifyItem>>> {
+        Arc::clone(&self.client_state.notifications)
+    }
+    
+    fn stats(&self) -> Arc<Mutex<Option<rutify_sdk::Stats>>> {
+        Arc::clone(&self.client_state.stats)
     }
 }
 
@@ -58,14 +94,52 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(&cli.server);
 
     match cli.command {
-        Commands::Gui => {
+        Some(Commands::Gui) => {
             run_gui(state).await?;
         }
-        Commands::Listen => {
+        Some(Commands::Listen) => {
             listen_websocket(state).await?;
         }
-        Commands::SendAndListen { message, title, device } => {
+        Some(Commands::SendAndListen { message, title, device }) => {
             send_and_listen(state, message, title, device).await?;
+        }
+        Some(Commands::Token { action }) => {
+            match action {
+                TokenAction::Create { usage, expires_in } => {
+                    println!("🔑 Creating new token for usage: '{}', expires in {} hours", usage, expires_in);
+                    match state.client_state.create_token(&usage, expires_in).await {
+                        Ok(token_response) => {
+                            println!("✅ Token created successfully!");
+                            println!("   Token ID: {}", token_response.token_id);
+                            println!("   Usage: {}", token_response.usage);
+                            println!("   Expires at: {}", token_response.expires_at);
+                            println!("   Token: {}", token_response.token);
+                            println!("   💡 Save this token securely!");
+                        }
+                        Err(e) => eprintln!("❌ Failed to create token: {}", e),
+                    }
+                }
+                TokenAction::Set { token } => {
+                    println!("🔐 Setting authentication token...");
+                    println!("   Token set: {}...", &token[..std::cmp::min(20, token.len())]);
+                    println!("   💡 Use this token for subsequent requests");
+                }
+                TokenAction::Clear => {
+                    println!("🗑️  Clearing stored token...");
+                    println!("   Token cleared");
+                }
+                TokenAction::Status => {
+                    if state.client_state.has_token() {
+                        println!("✅ Token is configured");
+                    } else {
+                        println!("❌ No token configured");
+                    }
+                }
+            }
+        }
+        None => {
+            // Default behavior - start GUI
+            run_gui(state).await?;
         }
     }
 
@@ -76,21 +150,19 @@ async fn run_gui(state: AppState) -> anyhow::Result<()> {
     let ui = MainWindow::new()?;
     
     // Set up UI callbacks
-    let notifications = Arc::clone(&state.notifications);
-    let stats = Arc::clone(&state.stats);
-    let client = state.client.clone();
+    let client_state = state.client_state.clone();
     
     // Refresh button callback
     let ui_weak = ui.as_weak();
-    let client_clone = client.clone();
-    let notifications_clone = Arc::clone(&notifications);
+    let client_state = state.client_state.clone();
+    let notifications = Arc::clone(&state.notifications());
     ui.on_refresh_clicked(move || {
         let ui_weak = ui_weak.clone();
-        let client = client_clone.clone();
-        let notifications = Arc::clone(&notifications_clone);
+        let client_state = client_state.clone();
+        let notifications = Arc::clone(&notifications);
         
         tokio::spawn(async move {
-            match client.get_notifies().await {
+            match client_state.get_notifies().await {
                 Ok(items) => {
                     let mut guard = notifications.lock().unwrap();
                     guard.clear();
@@ -109,10 +181,10 @@ async fn run_gui(state: AppState) -> anyhow::Result<()> {
     
     // Send notification callback
     let ui_weak = ui.as_weak();
-    let client_clone = client.clone();
+    let client_state = state.client_state.clone();
     ui.on_send_notification(move |message, title, device| {
         let ui_weak = ui_weak.clone();
-        let client = client_clone.clone();
+        let client_state = client_state.clone();
         
         let input = rutify_sdk::NotificationInput {
             notify: message.to_string(),
@@ -121,7 +193,7 @@ async fn run_gui(state: AppState) -> anyhow::Result<()> {
         };
         
         tokio::spawn(async move {
-            match client.send_notification(&input).await {
+            match client_state.send_notification(&input).await {
                 Ok(_) => {
                     if let Some(ui) = ui_weak.upgrade() {
                         ui.set_status("Notification sent successfully!".into());
@@ -138,15 +210,15 @@ async fn run_gui(state: AppState) -> anyhow::Result<()> {
     
     // Initial data load
     let ui_weak = ui.as_weak();
-    let client_clone = client.clone();
-    let notifications_clone = Arc::clone(&notifications);
-    let stats_clone = Arc::clone(&stats);
+    let client_state = state.client_state.clone();
+    let notifications = Arc::clone(&state.notifications());
+    let stats = Arc::clone(&state.stats());
     
     tokio::spawn(async move {
         // Load notifications
-        match client_clone.get_notifies().await {
+        match client_state.get_notifies().await {
             Ok(items) => {
-                let mut guard = notifications_clone.lock().unwrap();
+                let mut guard = notifications.lock().unwrap();
                 guard.clear();
                 guard.extend(items);
                 
@@ -160,9 +232,9 @@ async fn run_gui(state: AppState) -> anyhow::Result<()> {
         }
         
         // Load stats
-        match client_clone.get_stats().await {
+        match client_state.get_stats().await {
             Ok(stats_data) => {
-                let mut guard = stats_clone.lock().unwrap();
+                let mut guard = stats.lock().unwrap();
                 *guard = Some(stats_data);
                 
                 if let Some(ui) = ui_weak.upgrade() {
@@ -198,42 +270,28 @@ async fn listen_websocket(state: AppState) -> anyhow::Result<()> {
     println!("🎧 Listening for WebSocket notifications...");
     println!("   Press Ctrl+C to stop");
     
-    match state.client.connect_websocket().await {
+    match state.client_state.listen_websocket_updates().await {
         Ok(mut rx) => {
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    rutify_sdk::WebSocketMessage::Event(event) => {
+            while let Some(notification) = rx.recv().await {
+                match notification {
+                    WebSocketNotification::Event(event) => {
                         println!("🔔 New notification:");
                         println!("   Title: {}", event.data.title);
                         println!("   Message: {}", event.data.notify);
                         println!("   Device: {}", event.data.device);
                         println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
                         println!();
-                        
-                        // Add to local cache
-                        let mut guard = state.notifications.lock().unwrap();
-                        if guard.len() >= 100 {
-                            guard.pop_front();
-                        }
-                        guard.push_back(rutify_sdk::NotifyItem {
-                            id: 0, // Will be set by server
-                            title: event.data.title,
-                            notify: event.data.notify,
-                            device: event.data.device,
-                            received_at: event.timestamp,
-                        });
                     }
-                    rutify_sdk::WebSocketMessage::Text(text) => {
+                    WebSocketNotification::Text(text) => {
                         println!("📝 Text message: {}", text);
                     }
-                    rutify_sdk::WebSocketMessage::Error { message } => {
+                    WebSocketNotification::Error { message } => {
                         eprintln!("❌ Error: {}", message);
                     }
-                    rutify_sdk::WebSocketMessage::Close => {
+                    WebSocketNotification::Close => {
                         println!("🔌 Connection closed");
                         break;
                     }
-                    _ => {}
                 }
             }
         }
@@ -252,45 +310,34 @@ async fn send_and_listen(
     title: Option<String>,
     device: Option<String>,
 ) -> anyhow::Result<()> {
-    let input = rutify_sdk::NotificationInput {
-        notify: message,
-        title,
-        device,
-    };
-    
     println!("📤 Sending notification and listening for response...");
     
-    match state.client.connect_websocket().await {
-        Ok(mut rx) => {
-            // Send notification
-            state.client.send_notification(&input).await?;
-            println!("✅ Notification sent, waiting for response...");
-            
-            // Listen for response
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    rutify_sdk::WebSocketMessage::Event(event) => {
-                        println!("🔔 Response received:");
-                        println!("   Title: {}", event.data.title);
-                        println!("   Message: {}", event.data.notify);
-                        println!("   Device: {}", event.data.device);
-                        println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
-                        break;
-                    }
-                    rutify_sdk::WebSocketMessage::Text(text) => {
-                        println!("📝 Response: {}", text);
-                        break;
-                    }
-                    rutify_sdk::WebSocketMessage::Error { message } => {
-                        eprintln!("❌ Error: {}", message);
-                        break;
-                    }
-                    _ => {}
+    match client_send_and_listen(&state.client_state, message, title, device).await {
+        Ok(Some(notification)) => {
+            match notification {
+                WebSocketNotification::Event(event) => {
+                    println!("🔔 Response received:");
+                    println!("   Title: {}", event.data.title);
+                    println!("   Message: {}", event.data.notify);
+                    println!("   Device: {}", event.data.device);
+                    println!("   Time: {}", event.timestamp.format("%Y-%m-%d %H:%M:%S"));
+                }
+                WebSocketNotification::Text(text) => {
+                    println!("📝 Response: {}", text);
+                }
+                WebSocketNotification::Error { message } => {
+                    eprintln!("❌ Error: {}", message);
+                }
+                WebSocketNotification::Close => {
+                    println!("🔌 Connection closed");
                 }
             }
         }
+        Ok(None) => {
+            println!("⏰ No response received");
+        }
         Err(e) => {
-            eprintln!("❌ Failed to connect WebSocket: {}", e);
+            eprintln!("❌ Failed to send and listen: {}", e);
             return Err(e.into());
         }
     }

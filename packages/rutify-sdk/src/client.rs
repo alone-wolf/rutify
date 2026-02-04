@@ -11,6 +11,7 @@ pub struct RutifyClient {
     client: Client,
     pub base_url: String,
     pub timeout: Duration,
+    pub token: Option<String>,
 }
 
 impl RutifyClient {
@@ -19,7 +20,21 @@ impl RutifyClient {
             client: Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
             timeout: Duration::from_secs(30),
+            token: None,
         }
+    }
+
+    pub fn with_token(mut self, token: &str) -> Self {
+        self.token = Some(token.to_string());
+        self
+    }
+
+    pub fn set_token(&mut self, token: &str) {
+        self.token = Some(token.to_string());
+    }
+
+    pub fn clear_token(&mut self) {
+        self.token = None;
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -32,7 +47,14 @@ impl RutifyClient {
         T: serde::de::DeserializeOwned,
     {
         let url = format!("{}/{}/{}", self.base_url.trim_end_matches('/'), "api", endpoint.trim_start_matches('/'));
-        let response = self.client.get(&url).timeout(self.timeout).send().await?;
+        let mut request = self.client.get(&url).timeout(self.timeout);
+        
+        // 添加Authorization头如果有token
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+        
+        let response = request.send().await?;
         let response = response.error_for_status()?;
         let api_response: ApiResponse<T> = response.json().await?;
         
@@ -53,14 +75,26 @@ impl RutifyClient {
 
     pub async fn send_notification(&self, input: &NotificationInput) -> SdkResult<()> {
         let url = format!("{}/notify", self.base_url.trim_end_matches('/'));
-        let response = self.client.post(&url).timeout(self.timeout).json(input).send().await?;
+        let mut request = self.client.post(&url).timeout(self.timeout).json(input);
+        
+        // 添加Authorization头如果有token
+        if let Some(token) = &self.token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+        
+        let response = request.send().await?;
         response.error_for_status()?;
         Ok(())
     }
 
     pub async fn connect_websocket(&self) -> SdkResult<tokio::sync::mpsc::UnboundedReceiver<WebSocketMessage>> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
+        let mut ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
+        
+        // 添加token参数如果有token
+        if let Some(token) = &self.token {
+            ws_url = format!("{}?token={}", ws_url, token);
+        }
         
         match connect_async(&ws_url).await {
             Ok((ws_stream, _)) => {
@@ -113,7 +147,12 @@ impl RutifyClient {
     }
 
     pub async fn send_websocket_message(&self, message: &str) -> SdkResult<()> {
-        let ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
+        let mut ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
+        
+        // 添加token参数如果有token
+        if let Some(token) = &self.token {
+            ws_url = format!("{}?token={}", ws_url, token);
+        }
         
         match connect_async(&ws_url).await {
             Ok((mut ws_stream, _)) => {
@@ -124,6 +163,34 @@ impl RutifyClient {
             Err(e) => Err(SdkError::NetworkError(e.to_string())),
         }
     }
+
+    /// 创建新的Token
+    pub async fn create_token(&self, usage: &str, expires_in_hours: u64) -> SdkResult<TokenResponse> {
+        let url = format!("{}/auth/token", self.base_url.trim_end_matches('/'));
+        let request_body = serde_json::json!({
+            "usage": usage,
+            "expires_in_hours": expires_in_hours
+        });
+        
+        let response = self.client.post(&url)
+            .timeout(self.timeout)
+            .json(&request_body)
+            .send()
+            .await?;
+            
+        let response = response.error_for_status()?;
+        let token_response: TokenResponse = response.json().await?;
+        
+        Ok(token_response)
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct TokenResponse {
+    pub token: String,
+    pub token_id: String,
+    pub usage: String,
+    pub expires_at: String,
 }
 
 #[cfg(test)]
