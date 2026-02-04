@@ -1,0 +1,22 @@
+[package]
+name = "rutify-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GUI application for Rutify"
+
+[[bin]]
+name = "application"
+path = "src/main.rs"
+
+[dependencies]
+rutify-sdk = { workspace = true }
+slint = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+
+[build-dependencies]
+slint-build = { workspace = true }

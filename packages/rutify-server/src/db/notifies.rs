@@ -1,4 +1,4 @@
-use crate::sdk::NotificationData;
+use rutify_sdk::NotificationData;
 use chrono::Utc;
 use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;

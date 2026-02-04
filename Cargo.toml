@@ -1,18 +1,42 @@
-[package]
-name = "rutify"
+[workspace]
+resolver = "2"
+members = [
+    "packages/rutify-sdk",
+    "packages/rutify-server", 
+    "packages/rutify-client",
+    "packages/rutify-ui",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT"
+repository = "https://github.com/yourusername/rutify"
 
-[dependencies]
-axum = { version = "0.8.8", features = ["json", "macros", "ws"] }
-chrono = { version = "0.4", features = ["serde"] }
-sea-orm = { version = "2.0.0-rc.30", features = ["macros", "runtime-tokio-native-tls", "sqlx-sqlite"] }
-sea-orm-migration = {version = "2.0.0-rc.30"}
+[workspace.dependencies]
+# 统一版本管理
+reqwest = { version = "0.13", features = ["json", "query"] }
+tokio = { version = "1.37", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.37", features = ["full"] }
+axum = { version = "0.8", features = ["json", "macros", "ws"] }
+sea-orm = { version = "2.0.0-rc.30", features = ["macros", "runtime-tokio-native-tls", "sqlx-sqlite"] }
+sea-orm-migration = { version = "2.0.0-rc.30" }
+chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-async-trait = "0.1.89"
+tower-http = { version = "0.6.8", features = ["trace"] }
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "2.0"
+url = "2.5"
+tokio-tungstenite = "0.28"
+futures-util = "0.3"
 dotenvy = "0.15"
+async-trait = "0.1.89"
+slint = "1.14"
+slint-build = "1.14"
 
+# 内部包依赖
+rutify-sdk = { path = "packages/rutify-sdk", version = "0.1.0" }

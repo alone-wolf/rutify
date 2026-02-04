@@ -1,0 +1,18 @@
+[package]
+name = "rutify-sdk"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rutify SDK for HTTP and WebSocket communication"
+
+[dependencies]
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }

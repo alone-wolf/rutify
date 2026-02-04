@@ -1,4 +1,4 @@
-POST http://127.0.0.1:3000/notify
+POST http://127.0.0.1:8080/notify
 Content-Type: application/json
 
 {
@@ -8,7 +8,7 @@ Content-Type: application/json
 }
 
 ###
-GET http://127.0.0.1:3000
+GET http://127.0.0.1:8080
 
 ###
 

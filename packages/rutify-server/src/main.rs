@@ -2,12 +2,11 @@ mod app;
 mod db;
 mod error;
 mod routes;
-mod sdk;
 mod state;
 
 slint::include_modules!();
 
-use crate::sdk::{RutifyClient, NotifyItemData};
+use rutify_sdk::{RutifyClient, NotifyItemData};
 use crate::state::AppState;
 use clap::Parser;
 use dotenvy::dotenv;
@@ -46,7 +45,7 @@ fn main() -> anyhow::Result<()> {
 
 fn run_cli_only() -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
-    let r = rt.block_on(async { rutify_service().await });
+    let _r = rt.block_on(async { rutify_service().await });
 
     Ok(())
 }
@@ -136,7 +135,7 @@ fn run_with_ui() -> anyhow::Result<()> {
 
     rt.spawn(async move {
         rutify_service().await.ok();
-        slint::invoke_from_event_loop(move || if let Some(ui) = weak_ui.upgrade() {}).ok();
+        slint::invoke_from_event_loop(move || if let Some(_ui) = weak_ui.upgrade() {}).ok();
     });
     ui.run()?;
     Ok(())

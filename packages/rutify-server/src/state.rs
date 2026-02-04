@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
 use tokio::sync::broadcast;
-use crate::sdk::NotifyEvent;
+use rutify_sdk::NotifyEvent;
 
 #[derive(Clone)]
 pub(crate) struct AppState {

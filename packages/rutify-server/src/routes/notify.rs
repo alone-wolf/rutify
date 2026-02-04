@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::sdk::{NotificationData, NotificationInput, NotifyEvent};
+use rutify_sdk::{NotificationData, NotificationInput, NotifyEvent};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Query, State};

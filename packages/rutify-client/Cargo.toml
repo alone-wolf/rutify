@@ -1,0 +1,18 @@
+[package]
+name = "rutify-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI client for Rutify"
+
+[[bin]]
+name = "client"
+path = "src/main.rs"
+
+[dependencies]
+rutify-sdk = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
