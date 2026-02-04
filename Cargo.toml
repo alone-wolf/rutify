@@ -1,18 +1,20 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/rutify-core",
     "packages/rutify-sdk",
     "packages/rutify-server", 
-    "packages/rutify-client",
-    "packages/rutify-ui",
+    "packages/rutify-cli",
+    "packages/rutify-application",
+    "packages/rutify-panel",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["WriterPass <mail@writerpass.top>"]
 license = "MIT"
-repository = "https://github.com/yourusername/rutify"
+repository = "https://github.com/alone-wolf/rutify"
 
 [workspace.dependencies]
 # 统一版本管理
@@ -39,4 +41,5 @@ slint = "1.14"
 slint-build = "1.14"
 
 # 内部包依赖
+rutify-core = { path = "packages/rutify-core", version = "0.1.0" }
 rutify-sdk = { path = "packages/rutify-sdk", version = "0.1.0" }

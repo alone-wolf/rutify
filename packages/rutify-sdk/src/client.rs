@@ -1,58 +1,38 @@
-use crate::{error::*, types::*};
+use crate::error::*;
+use crate::SdkResult;
+use rutify_core::*;
 use reqwest::Client;
 use std::time::Duration;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
 
 #[derive(Clone)]
 pub struct RutifyClient {
     client: Client,
-    base_url: String,
-    ws_client: Arc<Mutex<Option<WebSocketClient>>>,
-}
-
-struct WebSocketClient {
-    sender: futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>,
-    _task: tokio::task::JoinHandle<()>,
+    pub base_url: String,
+    pub timeout: Duration,
 }
 
 impl RutifyClient {
-    pub fn new(base_url: impl Into<String>) -> Self {
-        let base_url = base_url.into();
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("Failed to create HTTP client");
-        
-        Self { 
-            client, 
-            base_url,
-            ws_client: Arc::new(Mutex::new(None)),
+    pub fn new(base_url: &str) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            timeout: Duration::from_secs(30),
         }
     }
 
-    pub fn with_timeout(base_url: impl Into<String>, timeout: Duration) -> SdkResult<Self> {
-        let base_url = base_url.into();
-        let client = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| SdkError::NetworkError(e.to_string()))?;
-        
-        Ok(Self { 
-            client, 
-            base_url,
-            ws_client: Arc::new(Mutex::new(None)),
-        })
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     async fn api_request<T>(&self, endpoint: &str) -> SdkResult<T>
     where
         T: serde::de::DeserializeOwned,
     {
-        let url = format!("{}/{}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'));
-        let response = self.client.get(&url).send().await?;
+        let url = format!("{}/{}/{}", self.base_url.trim_end_matches('/'), "api", endpoint.trim_start_matches('/'));
+        let response = self.client.get(&url).timeout(self.timeout).send().await?;
         let response = response.error_for_status()?;
         let api_response: ApiResponse<T> = response.json().await?;
         
@@ -63,94 +43,145 @@ impl RutifyClient {
         Ok(api_response.data)
     }
 
-    pub async fn get_notifies(&self) -> SdkResult<Vec<NotifyItemData>> {
-        self.api_request("api/notifies").await
+    pub async fn get_notifies(&self) -> SdkResult<Vec<NotifyItem>> {
+        self.api_request("notifies").await
     }
 
     pub async fn get_stats(&self) -> SdkResult<Stats> {
-        self.api_request("api/stats").await
+        self.api_request("stats").await
     }
 
-    pub async fn send_notify(&self, input: &NotificationInput) -> SdkResult<()> {
+    pub async fn send_notification(&self, input: &NotificationInput) -> SdkResult<()> {
         let url = format!("{}/notify", self.base_url.trim_end_matches('/'));
-        let response = self.client.post(&url).json(input).send().await?;
+        let response = self.client.post(&url).timeout(self.timeout).json(input).send().await?;
         response.error_for_status()?;
         Ok(())
     }
 
-    pub async fn connect_websocket<F>(&self, callback: F) -> SdkResult<()>
-    where
-        F: Fn(NotificationMessage) + Send + Sync + 'static,
-    {
+    pub async fn connect_websocket(&self) -> SdkResult<tokio::sync::mpsc::UnboundedReceiver<WebSocketMessage>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
         
-        let (ws_stream, _) = connect_async(&ws_url).await.map_err(|e| SdkError::NetworkError(e.to_string()))?;
-        let (sender, receiver) = ws_stream.split();
-        
-        let callback = Arc::new(callback);
-        
-        let task = tokio::spawn(async move {
-            let mut receiver = receiver;
-            while let Some(msg) = receiver.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<NotifyEvent>(&text.to_string()) {
-                            Ok(event) => callback(NotificationMessage::Event(event)),
-                            Err(_) => callback(NotificationMessage::Text(text.to_string())),
+        match connect_async(&ws_url).await {
+            Ok((ws_stream, _)) => {
+                let (mut write, mut read) = ws_stream.split();
+                
+                // Handle incoming messages
+                tokio::spawn(async move {
+                    while let Some(msg) = read.next().await {
+                        match msg {
+                            Ok(Message::Text(text)) => {
+                                if let Ok(event) = serde_json::from_str::<NotifyEvent>(&text) {
+                                    let _ = tx.send(WebSocketMessage::Event(event));
+                                } else {
+                                    let _ = tx.send(WebSocketMessage::Text(text.to_string()));
+                                }
+                            }
+                            Ok(Message::Binary(data)) => {
+                                if let Ok(text) = String::from_utf8(data.to_vec()) {
+                                    if let Ok(event) = serde_json::from_str::<NotifyEvent>(&text) {
+                                        let _ = tx.send(WebSocketMessage::Event(event));
+                                    } else {
+                                        let _ = tx.send(WebSocketMessage::Text(text));
+                                    }
+                                }
+                            }
+                            Ok(Message::Close(_)) => {
+                                let _ = tx.send(WebSocketMessage::Close);
+                                break;
+                            }
+                            Ok(Message::Ping(_)) => {
+                                // Respond to ping with pong
+                                if let Err(e) = write.send(Message::Pong(vec![].into())).await {
+                                    eprintln!("Failed to send pong: {}", e);
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(WebSocketMessage::Error { message: e.to_string() });
+                                break;
+                            }
+                            _ => {}
                         }
                     }
-                    Ok(Message::Close(_)) => {
-                        callback(NotificationMessage::Close);
-                        break;
-                    }
-                    Ok(Message::Binary(data)) => {
-                        if let Ok(text) = String::from_utf8(data.to_vec()) {
-                            callback(NotificationMessage::Text(text));
-                        }
-                    }
-                    Ok(Message::Ping(_)) | Ok(Message::Pong(_)) | Ok(Message::Frame(_)) => {
-                        // Ignore ping/pong/frame messages
-                    }
-                    Err(e) => {
-                        callback(NotificationMessage::Error(e.to_string()));
-                        break;
-                    }
-                }
+                });
+                
+                Ok(rx)
             }
-        });
-        
-        let ws_client = WebSocketClient {
-            sender,
-            _task: task,
-        };
-        
-        let mut ws_lock = self.ws_client.lock().await;
-        *ws_lock = Some(ws_client);
-        
-        Ok(())
-    }
-
-    pub async fn disconnect_websocket(&self) -> SdkResult<()> {
-        let mut ws_lock = self.ws_client.lock().await;
-        if let Some(mut ws_client) = ws_lock.take() {
-            let _ = ws_client.sender.send(Message::Close(None)).await;
+            Err(e) => Err(SdkError::NetworkError(e.to_string())),
         }
-        Ok(())
-    }
-
-    pub async fn is_websocket_connected(&self) -> bool {
-        let ws_lock = self.ws_client.lock().await;
-        ws_lock.is_some()
     }
 
     pub async fn send_websocket_message(&self, message: &str) -> SdkResult<()> {
-        let mut ws_lock = self.ws_client.lock().await;
-        if let Some(ws_client) = ws_lock.as_mut() {
-            ws_client.sender.send(Message::Text(message.to_string().into())).await
-                .map_err(|e| SdkError::NetworkError(e.to_string()))?;
-        } else {
-            return Err(SdkError::NetworkError("WebSocket not connected".to_string()));
+        let ws_url = format!("{}/ws", self.base_url.trim_end_matches('/').replace("http", "ws"));
+        
+        match connect_async(&ws_url).await {
+            Ok((mut ws_stream, _)) => {
+                ws_stream.send(Message::Text(message.to_string().into())).await
+                    .map_err(|e| SdkError::NetworkError(e.to_string()))?;
+                Ok(())
+            }
+            Err(e) => Err(SdkError::NetworkError(e.to_string())),
         }
-        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_client_creation() {
+        let client = RutifyClient::new("http://localhost:3000");
+        assert_eq!(client.base_url, "http://localhost:3000");
+    }
+
+    #[tokio::test]
+    async fn test_client_with_timeout() {
+        let client = RutifyClient::new("http://localhost:3000")
+            .with_timeout(Duration::from_secs(60));
+        assert_eq!(client.timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_sdk_error_display() {
+        let error = SdkError::NetworkError("Test error".to_string());
+        assert_eq!(error.to_string(), "Network error: Test error");
+    }
+
+    #[test]
+    fn test_sdk_result_type() {
+        fn returns_success() -> SdkResult<String> {
+            Ok("success".to_string())
+        }
+
+        fn returns_error() -> SdkResult<String> {
+            Err(SdkError::NetworkError("test".to_string()))
+        }
+
+        assert!(returns_success().is_ok());
+        assert!(returns_error().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_client_url_trimming() {
+        let client = RutifyClient::new("http://localhost:3000/");
+        assert_eq!(client.base_url, "http://localhost:3000");
+        
+        // trim_end_matches removes all trailing slashes
+        let client = RutifyClient::new("http://localhost:3000//");
+        assert_eq!(client.base_url, "http://localhost:3000");
+        
+        let client = RutifyClient::new("http://localhost:3000///");
+        assert_eq!(client.base_url, "http://localhost:3000");
+    }
+
+    #[tokio::test]
+    async fn test_timeout_configuration() {
+        let client = RutifyClient::new("http://localhost:3000")
+            .with_timeout(Duration::from_millis(500));
+        
+        assert_eq!(client.timeout, Duration::from_millis(500));
     }
 }

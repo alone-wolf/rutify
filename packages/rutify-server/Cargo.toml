@@ -8,6 +8,8 @@ repository.workspace = true
 description = "Rutify notification server"
 
 [dependencies]
+# 内部依赖
+rutify-core = { workspace = true }
 rutify-sdk = { workspace = true }
 axum = { workspace = true }
 sea-orm = { workspace = true }

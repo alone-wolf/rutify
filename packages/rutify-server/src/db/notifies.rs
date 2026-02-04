@@ -1,4 +1,4 @@
-use rutify_sdk::NotificationData;
+use rutify_core::NotificationData;
 use chrono::Utc;
 use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;

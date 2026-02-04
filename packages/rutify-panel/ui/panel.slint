@@ -1,0 +1,195 @@
+import { Button, ScrollView, VerticalBox, HorizontalBox, LineEdit } from "std-widgets.slint";
+
+export component ManagementWindow inherits Window {
+    title: "Rutify Management Panel";
+    width: 1000px;
+    height: 700px;
+    
+    in-out property <string> status: "Ready";
+    in-out property <int> today-count: 0;
+    in-out property <int> total-count: 0;
+    in-out property <int> device-count: 0;
+    in-out property <string> server-status: "Unknown";
+    in-out property <string> uptime: "Unknown";
+    
+    callback refresh_all();
+    callback delete_notification(int);
+    callback create_token(string);
+    callback delete_token(int);
+    callback send_test_notification(string, string, string);
+    
+    VerticalBox {
+        spacing: 10px;
+        padding: 10px;
+        
+        // Header
+        Rectangle {
+            height: 100px;
+            background: #2196F3;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 15px;
+                
+                Text {
+                    text: "Rutify Management Panel";
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: white;
+                }
+                
+                HorizontalBox {
+                    spacing: 30px;
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Today: " + root.today-count;
+                            font-size: 14px;
+                            color: white;
+                        }
+                        Text {
+                            text: "Total: " + root.total-count;
+                            font-size: 14px;
+                            color: white;
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Devices: " + root.device-count;
+                            font-size: 14px;
+                            color: white;
+                        }
+                        Text {
+                            text: "Server: " + root.server-status;
+                            font-size: 14px;
+                            color: root.server-status == "Running" ? #4CAF50 : #F44336;
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Uptime: " + root.uptime;
+                            font-size: 14px;
+                            color: white;
+                        }
+                    }
+                    
+                    Button {
+                        text: "Refresh All";
+                        clicked => { root.refresh_all(); }
+                    }
+                }
+            }
+        }
+        
+        // Test Notification Section
+        Rectangle {
+            height: 120px;
+            background: #f9f9f9;
+            border-width: 1px;
+            border-color: #ddd;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 10px;
+                spacing: 8px;
+                
+                Text {
+                    text: "Send Test Notification";
+                    font-weight: 600;
+                    font-size: 16px;
+                }
+                
+                HorizontalBox {
+                    spacing: 10px;
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Message:";
+                            font-size: 12px;
+                        }
+                        test-message-input := LineEdit {
+                            placeholder-text: "Test message...";
+                            height: 30px;
+                            text: "This is a test notification";
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Title:";
+                            font-size: 12px;
+                        }
+                        test-title-input := LineEdit {
+                            placeholder-text: "Test title...";
+                            height: 30px;
+                            text: "Test Notification";
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Device:";
+                            font-size: 12px;
+                        }
+                        test-device-input := LineEdit {
+                            placeholder-text: "Test device...";
+                            height: 30px;
+                            text: "test-device";
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Button {
+                            text: "Send Test";
+                            height: 30px;
+                            clicked => {
+                                root.send_test_notification(test-message-input.text, test-title-input.text, test-device-input.text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Status Bar
+        Rectangle {
+            height: 30px;
+            background: #f8f8f8;
+            
+            Text {
+                text: root.status;
+                font-size: 12px;
+                color: #666;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                padding-left: 10px;
+            }
+        }
+    }
+}
+
+component ManagementNotificationItem inherits Rectangle {
+    in-out property <int> id: 0;
+    in-out property <string> title: "";
+    in-out property <string> message: "";
+    in-out property <string> device: "";
+    in-out property <string> timestamp: "";
+}
+
+component TokenItem inherits Rectangle {
+    in-out property <int> id: 0;
+    in-out property <string> token: "";
+    in-out property <string> usage: "";
+    in-out property <string> created_at: "";
+    in-out property <bool> active: true;
+}
+
+component DeviceInfo inherits Rectangle {
+    in-out property <string> id: "";
+    in-out property <string> name: "";
+    in-out property <string> type: "";
+    in-out property <string> last_seen: "";
+    in-out property <bool> online: false;
+}

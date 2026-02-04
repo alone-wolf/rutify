@@ -5252,12 +5252,53 @@ dependencies = [
 ]
 
 [[package]]
-name = "rutify-client"
+name = "rutify-application"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "rutify-sdk",
+ "serde",
+ "slint",
+ "slint-build",
+ "tokio",
+]
+
+[[package]]
+name = "rutify-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "rutify-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rutify-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "rutify-panel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "rutify-sdk",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
  "tokio",
 ]
 
@@ -5267,6 +5308,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "reqwest",
+ "rutify-core",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5285,6 +5327,7 @@ dependencies = [
  "chrono",
  "clap",
  "dotenvy",
+ "rutify-core",
  "rutify-sdk",
  "sea-orm",
  "sea-orm-migration",
@@ -5296,18 +5339,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "rutify-ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "rutify-sdk",
- "slint",
- "slint-build",
- "tokio",
 ]
 
 [[package]]
@@ -7030,6 +7061,7 @@ version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee48d38b119b0cd71fe4141b30f5ba9c7c5d9f4e7a3a8b4a674e4b6ef789976f"
 dependencies = [
+ "getrandom 0.3.4",
  "js-sys",
  "serde_core",
  "wasm-bindgen",

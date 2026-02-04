@@ -1,0 +1,151 @@
+import { Button, ScrollView, VerticalBox, HorizontalBox, LineEdit } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "Rutify Application";
+    width: 800px;
+    height: 600px;
+    
+    in-out property <string> status: "Ready";
+    in-out property <int> today-count: 0;
+    in-out property <int> total-count: 0;
+    in-out property <int> device-count: 0;
+    in-out property <string> server-status: "Unknown";
+    
+    callback refresh_clicked();
+    callback send_notification(string, string, string);
+    
+    VerticalBox {
+        spacing: 10px;
+        padding: 10px;
+        
+        // Header
+        Rectangle {
+            height: 80px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 10px;
+                Text {
+                    text: "Rutify Notification Center";
+                    font-size: 20px;
+                    font-weight: 600;
+                    color: #333;
+                }
+                
+                HorizontalBox {
+                    spacing: 20px;
+                    Text {
+                        text: "Today: " + root.today-count;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Total: " + root.total-count;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Devices: " + root.device-count;
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Server: " + root.server-status;
+                        font-size: 14px;
+                        color: root.server-status == "Running" ? #4CAF50 : #F44336;
+                    }
+                }
+            }
+        }
+        
+        // Send Notification Section
+        Rectangle {
+            height: 120px;
+            background: #ffffff;
+            border-width: 1px;
+            border-color: #ddd;
+            border-radius: 8px;
+            
+            VerticalBox {
+                padding: 10px;
+                spacing: 8px;
+                
+                Text {
+                    text: "Send Notification";
+                    font-weight: 600;
+                    font-size: 16px;
+                }
+                
+                HorizontalBox {
+                    spacing: 10px;
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Message:";
+                            font-size: 12px;
+                        }
+                        message-input := LineEdit {
+                            placeholder-text: "Enter message...";
+                            height: 30px;
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Title:";
+                            font-size: 12px;
+                        }
+                        title-input := LineEdit {
+                            placeholder-text: "Enter title (optional)...";
+                            height: 30px;
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Text {
+                            text: "Device:";
+                            font-size: 12px;
+                        }
+                        device-input := LineEdit {
+                            placeholder-text: "Enter device (optional)...";
+                            height: 30px;
+                        }
+                    }
+                    
+                    VerticalBox {
+                        Button {
+                            text: "Send";
+                            height: 30px;
+                            clicked => {
+                                root.send_notification(message-input.text, title-input.text, device-input.text);
+                                message-input.text = "";
+                                title-input.text = "";
+                                device-input.text = "";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Status Bar
+        Rectangle {
+            height: 30px;
+            background: #f8f8f8;
+            
+            Text {
+                text: root.status;
+                font-size: 12px;
+                color: #666;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                padding-left: 10px;
+            }
+        }
+    }
+}
+
+component NotificationItem inherits Rectangle {
+    in-out property <string> title: "";
+    in-out property <string> message: "";
+    in-out property <string> device: "";
+    in-out property <string> timestamp: "";
+}

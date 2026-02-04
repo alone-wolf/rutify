@@ -6,7 +6,7 @@ mod state;
 
 slint::include_modules!();
 
-use rutify_sdk::{RutifyClient, NotifyItemData};
+use rutify_core::NotifyItem as CoreNotifyItem;
 use crate::state::AppState;
 use clap::Parser;
 use dotenvy::dotenv;
@@ -19,6 +19,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use rutify_sdk::RutifyClient;
 
 #[derive(clap::Parser)]
 struct CliArgs {
@@ -79,7 +80,7 @@ fn run_with_ui() -> anyhow::Result<()> {
     let weak_ui = ui.as_weak();
     let service_addr = resolve_service_addr();
     let sdk_client = RutifyClient::new(&service_addr);
-    let cached_notifies: Arc<Mutex<Vec<NotifyItemData>>> = Arc::new(Mutex::new(Vec::new()));
+    let cached_notifies: Arc<Mutex<Vec<CoreNotifyItem>>> = Arc::new(Mutex::new(Vec::new()));
     ui.set_service_addr(service_addr.clone().into());
 
     // 启动服务器
@@ -173,7 +174,7 @@ fn resolve_service_addr() -> String {
     format!("http://{}", addr.replace("0.0.0.0", "127.0.0.1"))
 }
 
-fn notify_model(items: &[NotifyItemData]) -> ModelRc<NotifyItem> {
+fn notify_model(items: &[CoreNotifyItem]) -> ModelRc<NotifyItem> {
     let converted: Vec<NotifyItem> = items
         .iter()
         .map(|item| NotifyItem {
@@ -181,7 +182,7 @@ fn notify_model(items: &[NotifyItemData]) -> ModelRc<NotifyItem> {
             title: item.title.clone().into(),
             notify: item.notify.clone().into(),
             device: item.device.clone().into(),
-            received_at: item.received_at.clone().into(),
+            received_at: item.received_at.format("%Y-%m-%d %H:%M:%S").to_string().into(),
         })
         .collect();
     ModelRc::new(VecModel::from(converted))
@@ -189,17 +190,20 @@ fn notify_model(items: &[NotifyItemData]) -> ModelRc<NotifyItem> {
 
 fn apply_notifies_to_ui(
     ui: slint::Weak<AppWindow>,
-    cache: Arc<Mutex<Vec<NotifyItemData>>>,
-    items: Vec<NotifyItemData>,
+    cache: Arc<Mutex<Vec<CoreNotifyItem>>>,
+    items: Vec<CoreNotifyItem>,
 ) {
     {
         let mut guard = cache.lock().unwrap();
         *guard = items.clone();
     }
 
+    let _cache_clone = Arc::clone(&cache);
+    let items_clone = items.clone();
+    
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui.upgrade() {
-            let recent: Vec<NotifyItemData> = items.iter().take(5).cloned().collect();
+            let recent: Vec<CoreNotifyItem> = items_clone.iter().take(5).cloned().collect();
             ui.set_all_notifies(notify_model(&items));
             ui.set_recent_notifies(notify_model(&recent));
         }
@@ -230,4 +234,125 @@ async fn rutify_service() -> Result<(), DbErr> {
     let tcp = TcpListener::bind(addr).await.unwrap();
     axum::serve(tcp, app).await.unwrap();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::Database;
+    use slint::Model;
+
+    #[tokio::test]
+    async fn test_database_connection() {
+        let db_url = "sqlite::memory:";
+        let result = Database::connect(db_url).await;
+        
+        assert!(result.is_ok());
+        let db = result.unwrap();
+        // Test that we can ping the database
+        let ping_result = db.ping().await;
+        assert!(ping_result.is_ok());
+    }
+
+    #[test]
+    fn test_resolve_service_addr_default() {
+        // Test the function with default behavior
+        let addr = resolve_service_addr();
+        // Should return default address when RUTIFY_ADDR is not set
+        assert!(addr.contains("127.0.0.1"));
+        assert!(addr.contains("3000"));
+    }
+
+    #[test]
+    fn test_resolve_service_addr_custom() {
+        unsafe {
+            std::env::set_var("RUTIFY_ADDR", "0.0.0.0:8080");
+            let addr = resolve_service_addr();
+            assert_eq!(addr, "http://127.0.0.1:8080");
+            std::env::remove_var("RUTIFY_ADDR");
+        }
+    }
+
+    #[test]
+    fn test_notify_model_empty() {
+        let items: Vec<CoreNotifyItem> = vec![];
+        let model = notify_model(&items);
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn test_notify_model_single_item() {
+        let items = vec![CoreNotifyItem {
+            id: 1,
+            title: "Test".to_string(),
+            notify: "Message".to_string(),
+            device: "Device".to_string(),
+            received_at: chrono::Utc::now(),
+        }];
+        
+        let model = notify_model(&items);
+        assert_eq!(model.row_count(), 1);
+    }
+
+    #[test]
+    fn test_notify_model_multiple_items() {
+        let items = vec![
+            CoreNotifyItem {
+                id: 1,
+                title: "Test 1".to_string(),
+                notify: "Message 1".to_string(),
+                device: "Device 1".to_string(),
+                received_at: chrono::Utc::now(),
+            },
+            CoreNotifyItem {
+                id: 2,
+                title: "Test 2".to_string(),
+                notify: "Message 2".to_string(),
+                device: "Device 2".to_string(),
+                received_at: chrono::Utc::now(),
+            },
+        ];
+        
+        let model = notify_model(&items);
+        assert_eq!(model.row_count(), 2);
+    }
+
+    #[test]
+    fn test_apply_notifies_to_ui_empty() {
+        let cache = Arc::new(std::sync::Mutex::new(Vec::<CoreNotifyItem>::new()));
+        let items: Vec<CoreNotifyItem> = vec![];
+        
+        // This should not panic
+        apply_notifies_to_ui(
+            slint::Weak::default(), // Empty weak reference
+            cache,
+            items,
+        );
+    }
+
+    #[test]
+    fn test_apply_notifies_to_ui_with_items() {
+        let cache = Arc::new(std::sync::Mutex::new(Vec::<CoreNotifyItem>::new()));
+        let items = vec![
+            CoreNotifyItem {
+                id: 1,
+                title: "Test".to_string(),
+                notify: "Message".to_string(),
+                device: "Device".to_string(),
+                received_at: chrono::Utc::now(),
+            },
+        ];
+        
+        // This should not panic
+        apply_notifies_to_ui(
+            slint::Weak::default(), // Empty weak reference
+            cache.clone(),
+            items,
+        );
+        
+        // Verify the cache was updated
+        let guard = cache.lock().unwrap();
+        assert_eq!(guard.len(), 1);
+        assert_eq!(guard[0].id, 1);
+    }
 }

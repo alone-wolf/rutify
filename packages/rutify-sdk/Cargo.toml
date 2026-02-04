@@ -8,6 +8,10 @@ repository.workspace = true
 description = "Rutify SDK for HTTP and WebSocket communication"
 
 [dependencies]
+# 内部依赖
+rutify-core = { workspace = true }
+
+# 外部依赖
 reqwest = { workspace = true }
 tokio-tungstenite = { workspace = true }
 serde = { workspace = true }

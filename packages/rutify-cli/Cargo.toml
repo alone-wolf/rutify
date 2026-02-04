@@ -1,22 +1,23 @@
 [package]
-name = "rutify-ui"
+name = "rutify-cli"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "GUI application for Rutify"
+description = "Rutify CLI client"
 
 [[bin]]
-name = "application"
+name = "rutify-cli"
 path = "src/main.rs"
 
 [dependencies]
+# 内部依赖
 rutify-sdk = { workspace = true }
-slint = { workspace = true }
-tokio = { workspace = true }
-anyhow = { workspace = true }
-clap = { workspace = true }
 
-[build-dependencies]
-slint-build = { workspace = true }
+# 外部依赖
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

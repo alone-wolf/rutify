@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use rutify_sdk::{NotificationData, NotificationInput, NotifyEvent};
+use rutify_core::{NotificationData, NotificationInput, NotifyEvent};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -81,6 +81,7 @@ async fn receive_notify_logic(state: Arc<AppState>, payload: NotificationInput) 
     let event = NotifyEvent {
         event: "notify".to_string(),
         data,
+        timestamp: chrono::Utc::now(),
     };
     let _ = tx.send(event);
 }
