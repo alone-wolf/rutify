@@ -44,6 +44,17 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_cli_only() -> anyhow::Result<()> {
+    dotenv().ok();
+    
+    // 初始化日志系统
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "rutify=debug,tower_http=debug,axum=trace".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let rt = tokio::runtime::Runtime::new()?;
     let _r = rt.block_on(async { rutify_service().await });
 
@@ -51,9 +62,18 @@ fn run_cli_only() -> anyhow::Result<()> {
 }
 
 fn run_with_ui() -> anyhow::Result<()> {
-    let ui = AppWindow::new()?;
     dotenv().ok();
+    
+    // 初始化日志系统
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "rutify=debug,tower_http=debug,axum=trace".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
+    let ui = AppWindow::new()?;
     let rt = tokio::runtime::Runtime::new()?;
     let rt_handle = rt.handle().clone();
     let weak_ui = ui.as_weak();
@@ -61,6 +81,17 @@ fn run_with_ui() -> anyhow::Result<()> {
     let sdk_client = RutifyClient::new(&service_addr);
     let cached_notifies: Arc<Mutex<Vec<NotifyItemData>>> = Arc::new(Mutex::new(Vec::new()));
     ui.set_service_addr(service_addr.clone().into());
+
+    // 启动服务器
+    let _server_handle = rt_handle.spawn(async move {
+        if let Err(e) = rutify_service().await {
+            tracing::error!("Server failed to start: {}", e);
+        }
+        slint::invoke_from_event_loop(move || if let Some(_ui) = weak_ui.upgrade() {}).ok();
+    });
+
+    // 等待一小段时间让服务器启动
+    std::thread::sleep(std::time::Duration::from_millis(1000));
 
     let search_cache = Arc::clone(&cached_notifies);
     let search_ui = ui.as_weak();
@@ -121,9 +152,9 @@ fn run_with_ui() -> anyhow::Result<()> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = stats_ui.upgrade() {
                         ui.set_stats(StatData {
-                            today_count: stats.today_count,
-                            total_count: stats.total_count,
-                            device_count: stats.device_count,
+                            today_count: stats.today_count.into(),
+                            total_count: stats.total_count.into(),
+                            device_count: stats.device_count.into(),
                             is_running: stats.is_running,
                         });
                     }
@@ -133,10 +164,6 @@ fn run_with_ui() -> anyhow::Result<()> {
         }
     });
 
-    rt.spawn(async move {
-        rutify_service().await.ok();
-        slint::invoke_from_event_loop(move || if let Some(_ui) = weak_ui.upgrade() {}).ok();
-    });
     ui.run()?;
     Ok(())
 }
@@ -180,15 +207,6 @@ fn apply_notifies_to_ui(
 }
 
 async fn rutify_service() -> Result<(), DbErr> {
-    dotenv().ok();
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rutify=debug,tower_http=debug,axum=trace".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
     let db_url = std::env::var("RUTIFY_DB_URL")
         .unwrap_or_else(|_| "sqlite://rutify.db?mode=rwc".to_string());
     let db_cnn = Database::connect(&db_url).await?;

@@ -1,1 +1,0 @@
-pub mod m00001_create_table_notifies;
