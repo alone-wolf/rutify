@@ -1,4 +1,4 @@
-use crate::db::migration::{m00001_create_table_notifies, m00002_create_table_tokens};
+use crate::db::migration::m00001_create_all_tables;
 use sea_orm::DbConn;
 use sea_orm_migration::{MigrationTrait, MigratorTrait};
 
@@ -11,9 +11,6 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-            Box::new(m00001_create_table_notifies::Migration),
-            Box::new(m00002_create_table_tokens::Migration),
-        ]
+        vec![Box::new(m00001_create_all_tables::Migration)]
     }
 }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// 通知项数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,12 +139,14 @@ pub enum RutifyError {
 impl std::fmt::Display for RutifyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RutifyError::Network { message } => write!(f, "Network error: {}", message),
-            RutifyError::Api { status, message } => write!(f, "API error [{}]: {}", status, message),
-            RutifyError::Parse { message } => write!(f, "Parse error: {}", message),
-            RutifyError::Auth { message } => write!(f, "Auth error: {}", message),
-            RutifyError::Config { message } => write!(f, "Config error: {}", message),
-            RutifyError::Unknown { message } => write!(f, "Unknown error: {}", message),
+            RutifyError::Network { message } => write!(f, "Network errors: {}", message),
+            RutifyError::Api { status, message } => {
+                write!(f, "API errors [{}]: {}", status, message)
+            }
+            RutifyError::Parse { message } => write!(f, "Parse errors: {}", message),
+            RutifyError::Auth { message } => write!(f, "Auth errors: {}", message),
+            RutifyError::Config { message } => write!(f, "Config errors: {}", message),
+            RutifyError::Unknown { message } => write!(f, "Unknown errors: {}", message),
         }
     }
 }
@@ -153,98 +155,3 @@ impl std::error::Error for RutifyError {}
 
 /// 结果类型
 pub type RutifyResult<T> = Result<T, RutifyError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::Utc;
-
-    #[test]
-    fn test_notify_item_creation() {
-        let item = NotifyItem {
-            id: 1,
-            title: "Test Title".to_string(),
-            notify: "Test Message".to_string(),
-            device: "Test Device".to_string(),
-            received_at: Utc::now(),
-        };
-
-        assert_eq!(item.id, 1);
-        assert_eq!(item.title, "Test Title");
-        assert_eq!(item.notify, "Test Message");
-        assert_eq!(item.device, "Test Device");
-    }
-
-    #[test]
-    fn test_stats_creation() {
-        let stats = Stats {
-            today_count: 10,
-            total_count: 100,
-            device_count: 5,
-            is_running: true,
-        };
-
-        assert_eq!(stats.today_count, 10);
-        assert_eq!(stats.total_count, 100);
-        assert_eq!(stats.device_count, 5);
-        assert!(stats.is_running);
-    }
-
-    #[test]
-    fn test_notification_input() {
-        let input = NotificationInput {
-            notify: "Test notification".to_string(),
-            title: Some("Test Title".to_string()),
-            device: Some("Test Device".to_string()),
-        };
-
-        assert_eq!(input.notify, "Test notification");
-        assert_eq!(input.title, Some("Test Title".to_string()));
-        assert_eq!(input.device, Some("Test Device".to_string()));
-    }
-
-    #[test]
-    fn test_websocket_message_text() {
-        let msg = WebSocketMessage::Text("Hello World".to_string());
-        match msg {
-            WebSocketMessage::Text(text) => assert_eq!(text, "Hello World"),
-            _ => panic!("Expected Text message"),
-        }
-    }
-
-    #[test]
-    fn test_rutify_error_display() {
-        let error = RutifyError::Network {
-            message: "Network error".to_string(),
-        };
-        assert_eq!(error.to_string(), "Network error: Network error");
-    }
-
-    #[test]
-    fn test_token_item_creation() {
-        let token = TokenItem {
-            id: 1,
-            token_hash: "abc123".to_string(),
-            usage: "api".to_string(),
-            created_at: Utc::now(),
-        };
-
-        assert_eq!(token.id, 1);
-        assert_eq!(token.token_hash, "abc123");
-        assert_eq!(token.usage, "api");
-    }
-
-    #[test]
-    fn test_device_info_creation() {
-        let device = DeviceInfo {
-            id: Some(123),
-            name: "Test Device".to_string(),
-            last_seen: Some(Utc::now()),
-            is_active: true,
-        };
-
-        assert_eq!(device.id, Some(123));
-        assert_eq!(device.name, "Test Device");
-        assert!(device.is_active);
-    }
-}

@@ -1,5 +1,5 @@
-use rutify_core::NotificationData;
 use chrono::Utc;
+use rutify_core::NotificationData;
 use sea_orm::ActiveValue;
 use sea_orm::entity::prelude::*;
 

@@ -26,13 +26,16 @@ serde_json = { workspace = true }
 slint = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+common-http-server-rs = { workspace = true }
 
 # JWT 认证依赖
-jsonwebtoken = "9.2"
+jsonwebtoken = "10.3.0"
 uuid = { version = "1.6", features = ["v4"] }
 sha2 = "0.10"
 hex = "0.4"
 time = "0.3"
+bcrypt = "0.18.0"
+base64 = "0.22.1"
 
 [build-dependencies]
 slint-build = { workspace = true }

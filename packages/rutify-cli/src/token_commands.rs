@@ -23,10 +23,13 @@ pub enum TokenAction {
     Status,
 }
 
-pub async fn handle_token_command(state: &ClientState, action: TokenAction) -> Result<()> {
+pub async fn handle_token_command(state: &mut ClientState, action: TokenAction) -> Result<()> {
     match action {
         TokenAction::Create { usage, expires_in } => {
-            println!("🔑 Creating new token for usage: '{}', expires in {} hours", usage, expires_in);
+            println!(
+                "🔑 Creating new token for usage: '{}', expires in {} hours",
+                usage, expires_in
+            );
             match state.create_token(&usage, expires_in).await {
                 Ok(token_response) => {
                     println!("✅ Token created successfully!");
@@ -41,11 +44,16 @@ pub async fn handle_token_command(state: &ClientState, action: TokenAction) -> R
         }
         TokenAction::Set { token } => {
             println!("🔐 Setting authentication token...");
-            println!("   Token set: {}...", &token[..std::cmp::min(20, token.len())]);
+            state.set_token(&token);
+            println!(
+                "   Token set: {}...",
+                &token[..std::cmp::min(20, token.len())]
+            );
             println!("   💡 Use this token for subsequent requests");
         }
         TokenAction::Clear => {
             println!("🗑️  Clearing stored token...");
+            state.clear_token();
             println!("   Token cleared");
         }
         TokenAction::Status => {

@@ -1,26 +1,23 @@
-mod app;
-mod auth;
+mod bootstrap;
 mod db;
 mod error;
 mod routes;
+mod services;
 mod state;
 
 slint::include_modules!();
 
-use rutify_core::NotifyItem as CoreNotifyItem;
 use crate::state::AppState;
 use clap::Parser;
+use common_http_server_rs::{MonitoringState, Server, setup_metrics_recorder};
 use dotenvy::dotenv;
-use sea_orm::{Database, DbErr};
-use slint::{ModelRc, VecModel};
-use std::{net::SocketAddr, sync::{Arc, Mutex}};
-use tokio::net::TcpListener;
-use tokio::sync::broadcast;
-use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use rutify_core::NotifyItem as CoreNotifyItem;
 use rutify_sdk::RutifyClient;
+use sea_orm::Database;
+use slint::{ModelRc, VecModel};
+use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
+use tracing::warn;
 
 #[derive(clap::Parser)]
 struct CliArgs {
@@ -41,33 +38,15 @@ fn main() -> anyhow::Result<()> {
 
 fn run_cli_only() -> anyhow::Result<()> {
     dotenv().ok();
-    
-    // 初始化日志系统
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rutify=debug,tower_http=debug,axum=trace".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
 
     let rt = tokio::runtime::Runtime::new()?;
-    let _r = rt.block_on(async { rutify_service().await });
+    rt.block_on(async { rutify_service().await })?;
 
     Ok(())
 }
 
 fn run_with_ui() -> anyhow::Result<()> {
     dotenv().ok();
-    
-    // 初始化日志系统
-    tracing_subscriber::registry()
-        .with(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rutify=debug,tower_http=debug,axum=trace".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
 
     let ui = AppWindow::new()?;
     let rt = tokio::runtime::Runtime::new()?;
@@ -177,7 +156,11 @@ fn notify_model(items: &[CoreNotifyItem]) -> ModelRc<NotifyItem> {
             title: item.title.clone().into(),
             notify: item.notify.clone().into(),
             device: item.device.clone().into(),
-            received_at: item.received_at.format("%Y-%m-%d %H:%M:%S").to_string().into(),
+            received_at: item
+                .received_at
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+                .into(),
         })
         .collect();
     ModelRc::new(VecModel::from(converted))
@@ -195,7 +178,7 @@ fn apply_notifies_to_ui(
 
     let _cache_clone = Arc::clone(&cache);
     let items_clone = items.clone();
-    
+
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui.upgrade() {
             let recent: Vec<CoreNotifyItem> = items_clone.iter().take(5).cloned().collect();
@@ -205,29 +188,31 @@ fn apply_notifies_to_ui(
     });
 }
 
-async fn rutify_service() -> Result<(), DbErr> {
+async fn rutify_service() -> anyhow::Result<()> {
     let db_url = std::env::var("RUTIFY_DB_URL")
         .unwrap_or_else(|_| "sqlite://rutify.db?mode=rwc".to_string());
     let db_cnn = Database::connect(&db_url).await?;
     db::initialize::initial(&db_cnn).await;
 
+    let monitoring = MonitoringState::new();
+    setup_metrics_recorder(monitoring.clone());
+
     let (tx, _) = broadcast::channel(200);
-    let state = Arc::new(AppState { db: db_cnn, tx });
+    let state = Arc::new(AppState {
+        db: db_cnn,
+        tx,
+        monitoring,
+    });
 
-    let app = app::axum_app(state);
+    let app_config = bootstrap::config::app_config_from_env();
+    let app_builder = bootstrap::app::app_builder(state, app_config)?;
+    let server_config = bootstrap::config::server_config_from_env()?;
+    let server = Server::new(server_config, app_builder);
 
-    let addr: SocketAddr = std::env::var("RUTIFY_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
-        .parse()
-        .expect("invalid RUTIFY_ADDR");
-
-    info!(
-        "rutify started at {}://{}",
-        "http",
-        addr.clone().to_string().replace("0.0.0.0", "127.0.0.1")
-    );
-    let tcp = TcpListener::bind(addr).await.unwrap();
-    axum::serve(tcp, app).await.unwrap();
+    server
+        .start()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to start server: {e}"))?;
     Ok(())
 }
 
@@ -241,7 +226,7 @@ mod tests {
     async fn test_database_connection() {
         let db_url = "sqlite::memory:";
         let result = Database::connect(db_url).await;
-        
+
         assert!(result.is_ok());
         let db = result.unwrap();
         // Test that we can ping the database
@@ -284,7 +269,7 @@ mod tests {
             device: "Device".to_string(),
             received_at: chrono::Utc::now(),
         }];
-        
+
         let model = notify_model(&items);
         assert_eq!(model.row_count(), 1);
     }
@@ -307,7 +292,7 @@ mod tests {
                 received_at: chrono::Utc::now(),
             },
         ];
-        
+
         let model = notify_model(&items);
         assert_eq!(model.row_count(), 2);
     }
@@ -316,7 +301,7 @@ mod tests {
     fn test_apply_notifies_to_ui_empty() {
         let cache = Arc::new(std::sync::Mutex::new(Vec::<CoreNotifyItem>::new()));
         let items: Vec<CoreNotifyItem> = vec![];
-        
+
         // This should not panic
         apply_notifies_to_ui(
             slint::Weak::default(), // Empty weak reference
@@ -328,23 +313,21 @@ mod tests {
     #[test]
     fn test_apply_notifies_to_ui_with_items() {
         let cache = Arc::new(std::sync::Mutex::new(Vec::<CoreNotifyItem>::new()));
-        let items = vec![
-            CoreNotifyItem {
-                id: 1,
-                title: "Test".to_string(),
-                notify: "Message".to_string(),
-                device: "Device".to_string(),
-                received_at: chrono::Utc::now(),
-            },
-        ];
-        
+        let items = vec![CoreNotifyItem {
+            id: 1,
+            title: "Test".to_string(),
+            notify: "Message".to_string(),
+            device: "Device".to_string(),
+            received_at: chrono::Utc::now(),
+        }];
+
         // This should not panic
         apply_notifies_to_ui(
             slint::Weak::default(), // Empty weak reference
             cache.clone(),
             items,
         );
-        
+
         // Verify the cache was updated
         let guard = cache.lock().unwrap();
         assert_eq!(guard.len(), 1);

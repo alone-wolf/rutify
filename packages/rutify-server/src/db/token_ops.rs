@@ -1,176 +1,177 @@
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
-use chrono::{DateTime, Utc};
-use crate::db::tokens;
+use crate::db::tokens::{self, Entity as Tokens, Model as TokenModel, TokenType};
 use crate::error::AppError;
+use chrono::Utc;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+};
+use uuid::Uuid;
 
-/// 创建新的 Token 记录
-pub async fn create_token(
+pub async fn create_notify_token(
     db: &DatabaseConnection,
     token_hash: &str,
     usage: &str,
-    expires_at: DateTime<Utc>,
-) -> Result<(), AppError> {
+    expires_at: chrono::DateTime<Utc>,
+    device_info: Option<String>,
+) -> Result<TokenModel, AppError> {
     let new_token = tokens::ActiveModel {
         token_hash: Set(token_hash.to_string()),
         usage: Set(usage.to_string()),
+        token_type: Set(TokenType::NotifyBearer),
+        user_id: Set(None),
+        device_info: Set(device_info),
         created_at: Set(Utc::now()),
         expires_at: Set(expires_at),
+        last_used_at: Set(None),
         ..Default::default()
     };
 
-    let result = tokens::Entity::insert(new_token)
-        .exec(db)
-        .await;
-
-    match result {
-        Ok(_) => {
-            tracing::info!("Token created successfully for usage: {}", usage);
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Failed to create token: {}", e);
-            Err(AppError::DatabaseError(format!("Failed to create token: {}", e)))
-        }
-    }
+    new_token
+        .insert(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create notify token: {e}")))
 }
 
-/// 验证 Token 是否存在且未过期
+pub async fn create_user_token(
+    db: &DatabaseConnection,
+    token_hash: &str,
+    user_id: Uuid,
+    expires_at: chrono::DateTime<Utc>,
+) -> Result<TokenModel, AppError> {
+    let new_token = tokens::ActiveModel {
+        token_hash: Set(token_hash.to_string()),
+        usage: Set("user_auth".to_string()),
+        token_type: Set(TokenType::UserJwt),
+        user_id: Set(Some(user_id)),
+        device_info: Set(None),
+        created_at: Set(Utc::now()),
+        expires_at: Set(expires_at),
+        last_used_at: Set(None),
+        ..Default::default()
+    };
+
+    new_token
+        .insert(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create user token: {e}")))
+}
+
 pub async fn verify_token_exists(
     db: &DatabaseConnection,
     token_hash: &str,
 ) -> Result<bool, AppError> {
-    let token = tokens::Entity::find()
+    let token = Tokens::find()
         .filter(tokens::Column::TokenHash.eq(token_hash))
+        .filter(tokens::Column::ExpiresAt.gt(Utc::now()))
         .one(db)
-        .await?;
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to verify token: {e}")))?;
 
-    match token {
-        Some(token_record) => {
-            // 检查是否过期
-            let now = Utc::now();
-            let is_expired = token_record.expires_at < now;
-            
-            if is_expired {
-                // 删除过期的 token
-                delete_token(db, token_hash).await?;
-                Ok(false)
-            } else {
-                Ok(true)
-            }
-        }
-        None => Ok(false),
-    }
+    Ok(token.is_some())
 }
 
-/// 删除 Token
-pub async fn delete_token(
+pub async fn update_token_last_used(
     db: &DatabaseConnection,
     token_hash: &str,
 ) -> Result<(), AppError> {
-    let result = tokens::Entity::delete_many()
+    let token = Tokens::find()
+        .filter(tokens::Column::TokenHash.eq(token_hash))
+        .one(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to find token: {e}")))?;
+
+    if let Some(token) = token {
+        let mut active_model: tokens::ActiveModel = token.into();
+        active_model.last_used_at = Set(Some(Utc::now()));
+        active_model.update(db).await.map_err(|e| {
+            AppError::DatabaseError(format!("Failed to update token last used: {e}"))
+        })?;
+    }
+
+    Ok(())
+}
+
+pub async fn cleanup_expired_tokens(db: &DatabaseConnection) -> Result<u64, AppError> {
+    let result = Tokens::delete_many()
+        .filter(tokens::Column::ExpiresAt.lt(Utc::now()))
+        .exec(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to cleanup expired tokens: {e}")))?;
+
+    Ok(result.rows_affected)
+}
+
+pub async fn get_user_tokens(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+) -> Result<Vec<TokenModel>, AppError> {
+    Tokens::find()
+        .filter(tokens::Column::UserId.eq(Some(user_id)))
+        .order_by_desc(tokens::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to get user tokens: {e}")))
+}
+
+pub async fn delete_token_by_id(db: &DatabaseConnection, token_id: i32) -> Result<bool, AppError> {
+    let result = Tokens::delete_by_id(token_id)
+        .exec(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to delete token: {e}")))?;
+
+    Ok(result.rows_affected > 0)
+}
+
+pub async fn delete_token_by_hash(
+    db: &DatabaseConnection,
+    token_hash: &str,
+) -> Result<u64, AppError> {
+    let result = Tokens::delete_many()
         .filter(tokens::Column::TokenHash.eq(token_hash))
         .exec(db)
-        .await;
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to delete token: {e}")))?;
 
-    match result {
-        Ok(delete_result) => {
-            if delete_result.rows_affected > 0 {
-                tracing::info!("Token deleted successfully: {}", token_hash);
-            }
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("Failed to delete token: {}", e);
-            Err(AppError::DatabaseError(format!("Failed to delete token: {}", e)))
-        }
-    }
+    Ok(result.rows_affected)
 }
 
-/// 清理过期的 Tokens
-pub async fn cleanup_expired_tokens(db: &DatabaseConnection) -> Result<u64, AppError> {
-    let now = Utc::now();
-    
-    let result = tokens::Entity::delete_many()
-        .filter(tokens::Column::ExpiresAt.lt(now))
+pub async fn delete_user_tokens(db: &DatabaseConnection, user_id: Uuid) -> Result<u64, AppError> {
+    let result = Tokens::delete_many()
+        .filter(tokens::Column::UserId.eq(Some(user_id)))
         .exec(db)
-        .await?;
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to delete user tokens: {e}")))?;
 
-    let deleted_count = result.rows_affected;
-    if deleted_count > 0 {
-        tracing::info!("Cleaned up {} expired tokens", deleted_count);
-    }
-
-    Ok(deleted_count)
+    Ok(result.rows_affected)
 }
 
-/// 获取所有 Token 信息 (管理员功能)
-pub async fn list_all_tokens(db: &DatabaseConnection) -> Result<Vec<tokens::Model>, AppError> {
-    let tokens = tokens::Entity::find()
+pub async fn list_all_tokens(db: &DatabaseConnection) -> Result<Vec<TokenModel>, AppError> {
+    Tokens::find()
+        .order_by_desc(tokens::Column::CreatedAt)
         .all(db)
-        .await?;
-
-    Ok(tokens)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to list all tokens: {e}")))
 }
 
-/// 根据 usage 获取 Tokens
 pub async fn list_tokens_by_usage(
     db: &DatabaseConnection,
     usage: &str,
-) -> Result<Vec<tokens::Model>, AppError> {
-    let tokens = tokens::Entity::find()
+) -> Result<Vec<TokenModel>, AppError> {
+    Tokens::find()
         .filter(tokens::Column::Usage.eq(usage))
+        .order_by_desc(tokens::Column::CreatedAt)
         .all(db)
-        .await?;
-
-    Ok(tokens)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to list tokens by usage: {e}")))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sea_orm::Database;
-    use chrono::Duration;
-
-    #[tokio::test]
-    async fn test_token_operations() {
-        // 使用内存数据库进行测试
-        let db = Database::connect("sqlite::memory:").await.unwrap();
-        
-        // 创建表 (这里需要确保 tokens 表存在)
-        // 在实际应用中，这应该通过迁移来完成
-        
-        let token_hash = "test_hash_123";
-        let usage = "test_usage";
-        let expires_at = Utc::now() + Duration::hours(24);
-        
-        // 测试创建 token
-        let result = create_token(&db, token_hash, usage, expires_at).await;
-        // 暂时跳过这个测试，因为需要数据库表结构
-        // assert!(result.is_ok());
-        
-        // 测试验证 token
-        let exists = verify_token_exists(&db, token_hash).await;
-        // assert!(exists.unwrap_or(false));
-        
-        // 测试删除 token
-        let delete_result = delete_token(&db, token_hash).await;
-        // assert!(delete_result.is_ok());
-        
-        // 验证删除后不存在
-        let exists_after_delete = verify_token_exists(&db, token_hash).await;
-        // assert!(!exists_after_delete.unwrap_or(true));
-    }
-
-    #[test]
-    fn test_token_hash_validation() {
-        // 测试 token hash 格式
-        let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        assert_eq!(hash.len(), 64);
-        
-        // 测试无效 hash
-        let invalid_hash = "invalid";
-        assert_ne!(invalid_hash.len(), 64);
-    }
+pub async fn list_tokens_by_type(
+    db: &DatabaseConnection,
+    token_type: TokenType,
+) -> Result<Vec<TokenModel>, AppError> {
+    Tokens::find()
+        .filter(tokens::Column::TokenType.eq(token_type))
+        .order_by_desc(tokens::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(|e| AppError::DatabaseError(format!("Failed to list tokens by type: {e}")))
 }

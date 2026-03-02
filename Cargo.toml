@@ -40,8 +40,12 @@ dotenvy = "0.15"
 async-trait = "0.1.89"
 slint = "1.14"
 slint-build = "1.14"
+common-http-server-rs = { git = "https://github.com/alone-wolf/common-http-server-rs.git", rev = "a8e1092dbcdfb6e7cd2d1da06622a1e5ab1ef914" }
 
 # 内部包依赖
 rutify-core = { path = "packages/rutify-core", version = "0.1.0" }
 rutify-sdk = { path = "packages/rutify-sdk", version = "0.1.0" }
 rutify-client = { path = "packages/rutify-client", version = "0.1.0" }
+
+[patch.crates-io]
+sysinfo = { path = "vendor/sysinfo-0.38.2" }

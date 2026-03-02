@@ -1,8 +1,10 @@
 use anyhow::Result;
-use rutify_sdk::{RutifyClient, WebSocketMessage, NotificationInput, NotifyItem, Stats, NotifyEvent};
 use rutify_sdk::client::TokenResponse;
-use std::sync::{Arc, Mutex};
+use rutify_sdk::{
+    NotificationInput, NotifyEvent, NotifyItem, RutifyClient, Stats, WebSocketMessage,
+};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 /// 共享的客户端状态管理
@@ -25,43 +27,51 @@ impl ClientState {
     /// 获取所有通知
     pub async fn get_notifies(&self) -> Result<Vec<NotifyItem>> {
         let notifies = self.client.get_notifies().await?;
-        
+
         // 更新本地缓存
         let mut guard = self.notifications.lock().unwrap();
         guard.clear();
         guard.extend(notifies.clone());
-        
+
         Ok(notifies)
     }
 
     /// 获取服务器统计信息
     pub async fn get_stats(&self) -> Result<Stats> {
         let stats = self.client.get_stats().await?;
-        
+
         // 更新本地缓存
         let mut guard = self.stats.lock().unwrap();
         *guard = Some(stats.clone());
-        
+
         Ok(stats)
     }
 
     /// 发送通知
     pub async fn send_notification(&self, input: &NotificationInput) -> Result<()> {
-        self.client.send_notification(input).await.map_err(|e| anyhow::Error::new(e))
+        self.client
+            .send_notification(input)
+            .await
+            .map_err(|e| anyhow::Error::new(e))
     }
 
     /// 连接WebSocket并返回消息接收器
     pub async fn connect_websocket(&self) -> Result<mpsc::UnboundedReceiver<WebSocketMessage>> {
-        self.client.connect_websocket().await.map_err(|e| anyhow::Error::new(e))
+        self.client
+            .connect_websocket()
+            .await
+            .map_err(|e| anyhow::Error::new(e))
     }
 
     /// 监听WebSocket消息并更新状态
-    pub async fn listen_websocket_updates(&self) -> Result<mpsc::UnboundedReceiver<WebSocketNotification>> {
+    pub async fn listen_websocket_updates(
+        &self,
+    ) -> Result<mpsc::UnboundedReceiver<WebSocketNotification>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let notifications = Arc::clone(&self.notifications);
-        
+
         let mut ws_rx = self.connect_websocket().await?;
-        
+
         tokio::spawn(async move {
             while let Some(msg) = ws_rx.recv().await {
                 match msg {
@@ -117,7 +127,10 @@ impl ClientState {
 
     /// 创建新的Token
     pub async fn create_token(&self, usage: &str, expires_in_hours: u64) -> Result<TokenResponse> {
-        self.client.create_token(usage, expires_in_hours).await.map_err(|e| anyhow::Error::new(e))
+        self.client
+            .create_token(usage, expires_in_hours)
+            .await
+            .map_err(|e| anyhow::Error::new(e))
     }
 
     /// 使用Token创建客户端
@@ -152,13 +165,13 @@ pub async fn send_and_listen(
         title,
         device,
     };
-    
+
     // 发送通知
     state.send_notification(&input).await?;
-    
+
     // 监听响应
     let mut rx = state.listen_websocket_updates().await?;
-    
+
     // 等待第一个响应
     if let Some(notification) = rx.recv().await {
         Ok(Some(notification))
@@ -193,6 +206,10 @@ pub fn format_stats(stats: &Stats) -> String {
         stats.today_count,
         stats.total_count,
         stats.device_count,
-        if stats.is_running { "✅ Yes" } else { "❌ No" }
+        if stats.is_running {
+            "✅ Yes"
+        } else {
+            "❌ No"
+        }
     )
 }
